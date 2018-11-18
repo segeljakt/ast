@@ -2,21 +2,23 @@ WHITESPACE      = _{ " " | "\t" | NEWLINE }
 
 program         =  { SOI ~ expr ~ EOI }
 
-expr            =  { unary_suffix ~ ( binary_infix_op ~ unary_suffix )* }
+expr            =  { binary_infix }
+
+binary_infix    = _{ unary_suffix ~ ( binary_infix_op ~ unary_suffix )* }
 binary_infix_op = _{ add | mul }
 add             =  { "+" }
 mul             =  { "*" }
 
-unary_suffix    =  { primary ~ unary_suffix_op* }
+unary_suffix    =  { unary_prefix ~ unary_suffix_op* }
 unary_suffix_op = _{ try }
 try             =  { "?" }
 
-primary         = _{ term | unary_prefix }
-
-unary_prefix    =  { unary_prefix_op ~ primary }
+unary_prefix    =  { unary_prefix_op* ~ primary }
 unary_prefix_op = _{ not | neg }
 not             =  { "!" }
 neg             =  { "-" }
+
+primary         = _{ term | "(" ~ expr ~ ")" }
 
 term            = @{ ( ASCII_ALPHA | "_" ) ~ ( ASCII_ALPHANUMERIC | "_" )* }
 

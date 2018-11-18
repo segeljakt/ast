@@ -112,7 +112,18 @@ mod ast {
         match pair.as_rule() {
           Rule::expr         => Ok(Expr::from_pest(&mut pair.into_inner())?),
           Rule::term         => Ok(Expr::Term(Term::from_pest(&mut Pairs::single(pair))?)),
-          Rule::unary_prefix => Ok(Expr::UnaryPrefix(UnaryPrefix::from_pest(&mut Pairs::single(pair))?)),
+          Rule::unary_prefix => {
+            let mut inner = pair.into_inner().rev();
+            let expr = Expr::from_pest(&mut Pairs::single(inner.next().unwrap()))?;
+            inner.try_fold(expr, |acc, pair|
+              match UnaryPrefixOp::from_pest(&mut Pairs::single(pair)) {
+                Ok(op) => Ok(Expr::UnaryPrefix(UnaryPrefix {
+                  op: op,
+                  expr: box acc,
+                })),
+                Err(e) => Err(e)
+              })
+          },
           Rule::unary_suffix => {
             let mut inner = pair.into_inner();
             let expr = Expr::from_pest(&mut Pairs::single(inner.next().unwrap()))?;
