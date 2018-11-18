@@ -1,0 +1,22 @@
+WHITESPACE      = _{ " " | "\t" | NEWLINE }
+
+program         =  { SOI ~ expr ~ EOI }
+
+expr            =  { unary_suffix ~ ( binary_infix_op ~ unary_suffix )* }
+binary_infix_op = _{ add | mul }
+add             =  { "+" }
+mul             =  { "*" }
+
+unary_suffix    =  { primary ~ unary_suffix_op* }
+unary_suffix_op = _{ try }
+try             =  { "?" }
+
+primary         = _{ term | unary_prefix }
+
+unary_prefix    =  { unary_prefix_op ~ primary }
+unary_prefix_op = _{ not | neg }
+not             =  { "!" }
+neg             =  { "-" }
+
+term            = @{ ( ASCII_ALPHA | "_" ) ~ ( ASCII_ALPHANUMERIC | "_" )* }
+
