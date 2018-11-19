@@ -1,24 +1,18 @@
-WHITESPACE      = _{ " " | "\t" | NEWLINE }
+WHITESPACE   =  _{ " " | "\t" | NEWLINE }
+ident        =  @{ ( ASCII_ALPHA | "_" ) ~ ( ASCII_ALPHANUMERIC | "_" )* }
 
-program         =  { SOI ~ expr ~ EOI }
-
-expr            =  { binary_infix }
-
-binary_infix    = _{ unary_suffix ~ ( binary_infix_op ~ unary_suffix )* }
-binary_infix_op = _{ add | mul }
-add             =  { "+" }
-mul             =  { "*" }
-
-unary_suffix    =  { unary_prefix ~ unary_suffix_op* }
-unary_suffix_op = _{ try }
-try             =  { "?" }
-
-unary_prefix    =  { unary_prefix_op* ~ primary }
-unary_prefix_op = _{ not | neg }
-not             =  { "!" }
-neg             =  { "-" }
-
-primary         = _{ term | "(" ~ expr ~ ")" }
-
-term            = @{ ( ASCII_ALPHA | "_" ) ~ ( ASCII_ALPHANUMERIC | "_" )* }
-
+program      =   { SOI ~ expr ~ EOI }
+  expr       =   { binop }
+    binop    =  _{ unop ~ ( infix ~ unop )* }
+      infix  =  _{ add | mul }
+        add  =   { "+" }
+        mul  =   { "*" }
+    unop     =   { prefix* ~ primary ~ suffix* }
+      prefix =  _{ not | neg }
+        not  =   { "!" }
+        neg  =   { "-" }
+      suffix =  _{ try | call }
+        try  =   { "?" }
+        call =   { "." ~ ident ~ "(" ~ expr ~ ( "," ~ expr )* ~ ")" }
+    primary  =  _{ term | "(" ~ expr ~ ")" }
+      term   =   { ident }

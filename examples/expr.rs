@@ -12,6 +12,7 @@ extern crate pest;
 extern crate void;
 #[macro_use]
 extern crate lazy_static;
+extern crate either;
 
 mod parser {
   #[derive(Parser)]
@@ -24,6 +25,7 @@ mod ast {
   use pest::{iterators::{Pair, Pairs}, prec_climber::PrecClimber};
   use from_pest::{FromPest, ConversionError};
   use void::Void;
+  use either::Either;
 
   type PestError = ConversionError<Void>;
 
@@ -34,51 +36,56 @@ mod ast {
 
   #[derive(Debug)]
   pub enum Expr<'p> {
-    UnaryPrefix(UnaryPrefix<'p>),
-    BinaryInfix(BinaryInfix<'p>),
-    UnarySuffix(UnarySuffix<'p>),
+    UnaryOp(UnaryOp<'p>),
+    BinaryOp(BinaryOp<'p>),
     Term(Term<'p>),
   }
 
   #[derive(Debug)]
-  pub struct UnaryPrefix<'p> {
-    pub op: UnaryPrefixOp,
+  pub struct UnaryOp<'p> {
+    pub op: Either<Prefix,Suffix<'p>>,
     pub expr: Box<Expr<'p>>
   }
 
   #[derive(Debug)]
-  pub enum UnaryPrefixOp {
+  pub struct BinaryOp<'p> {
+    pub lhs: Box<Expr<'p>>,
+    pub op: Infix,
+    pub rhs: Box<Expr<'p>>,
+  }
+
+  #[derive(Debug)]
+  pub enum Prefix {
     Not,
     Neg,
   }
 
   #[derive(Debug)]
-  pub struct UnarySuffix<'p> {
-    pub expr: Box<Expr<'p>>,
-    pub op: UnarySuffixOp,
-  }
-
-  #[derive(Debug)]
-  pub enum UnarySuffixOp {
-    Try,
-  }
-
-  #[derive(Debug)]
-  pub struct BinaryInfix<'p> {
-    pub lhs: Box<Expr<'p>>,
-    pub op: BinaryInfixOp,
-    pub rhs: Box<Expr<'p>>,
-  }
-
-  #[derive(Debug)]
-  pub enum BinaryInfixOp {
+  pub enum Infix {
     Add,
     Mul,
   }
 
   #[derive(Debug)]
+  pub enum Suffix<'p> {
+    Try,
+    Call(Call<'p>),
+  }
+
+  #[derive(Debug)]
+  pub struct Call<'p> {
+    pub id: Ident<'p>,
+    pub args: Vec<Expr<'p>>
+  }
+
+  #[derive(Debug)]
+  pub struct Ident<'p> {
+    pub id: &'p str,
+  }
+
+  #[derive(Debug)]
   pub struct Term<'p> {
-    pub term: &'p str,
+    pub id: Ident<'p>,
   }
 
   impl<'p> FromPest<'p> for Program<'p> {
@@ -110,52 +117,55 @@ mod ast {
       PREC_CLIMBER.climb(pest,
         |pair: Pair<Rule>|
         match pair.as_rule() {
-          Rule::expr         => Ok(Expr::from_pest(&mut pair.into_inner())?),
-          Rule::term         => Ok(Expr::Term(Term::from_pest(&mut Pairs::single(pair))?)),
-          Rule::unary_prefix => {
-            let mut inner = pair.into_inner().rev();
-            let expr = Expr::from_pest(&mut Pairs::single(inner.next().unwrap()))?;
-            inner.try_fold(expr, |acc, pair|
-              match UnaryPrefixOp::from_pest(&mut Pairs::single(pair)) {
-                Ok(op) => Ok(Expr::UnaryPrefix(UnaryPrefix {
-                  op: op,
-                  expr: box acc,
-                })),
-                Err(e) => Err(e)
-              })
-          },
-          Rule::unary_suffix => {
-            let mut inner = pair.into_inner();
-            let expr = Expr::from_pest(&mut Pairs::single(inner.next().unwrap()))?;
-            inner.try_fold(expr, |acc, pair|
-              match UnarySuffixOp::from_pest(&mut Pairs::single(pair)) {
-                Ok(op) => Ok(Expr::UnarySuffix(UnarySuffix {
-                  expr: box acc,
-                  op: op,
-                })),
-                Err(e) => Err(e)
-              })
-          },
-          _ => Err(ConversionError::NoMatch),
+          Rule::expr => Ok(Expr::from_pest(&mut pair.into_inner())?),
+          Rule::term => Ok(Expr::Term(Term::from_pest(&mut Pairs::single(pair))?)),
+          Rule::unop => climb_unop(&mut pair.into_inner()),
+          _          => Err(ConversionError::NoMatch),
         },
         |lhs: Result<Expr<'p>, PestError>, pair: Pair<Rule>, rhs: Result<Expr<'p>, PestError>|
-        Ok(Expr::BinaryInfix(BinaryInfix {
+        Ok(Expr::BinaryOp(BinaryOp {
           lhs: box lhs?,
-          op: BinaryInfixOp::from_pest(&mut Pairs::single(pair))?,
+          op: Infix::from_pest(&mut Pairs::single(pair))?,
           rhs: box rhs?
         }))
       )
     }
   }
 
-  impl<'p> FromPest<'p> for UnaryPrefix<'p> {
+  fn climb_unop<'p>(pairs: &mut Pairs<'p,Rule>) -> Result<Expr<'p>, PestError> {
+    let prefix = climb_prefix(pairs)?;
+    let suffix = climb_suffix(pairs, prefix);
+    suffix
+  }
+
+  fn climb_prefix<'p>(pairs: &mut Pairs<'p, Rule>) -> Result<Expr<'p>, PestError> {
+    let pair = pairs.next().unwrap();
+    Ok(match pair.as_rule() {
+      Rule::prefix => Expr::UnaryOp(UnaryOp {
+        op: Either::Left(Prefix::from_pest(&mut Pairs::single(pair))?),
+        expr: box climb_prefix(pairs)?,
+      }),
+      _ => Expr::from_pest(&mut Pairs::single(pairs.next().unwrap()))?,
+    })
+  }
+
+  fn climb_suffix<'p>(pairs: &mut Pairs<'p, Rule>, prefix: Expr<'p>) -> Result<Expr<'p>, PestError> {
+    pairs.map(|pair| Suffix::from_pest(&mut Pairs::single(pair)))
+      .try_fold(prefix, |acc, op|
+        op.and_then(|op| Ok(Expr::UnaryOp(UnaryOp {
+            op: Either::Right(op),
+            expr: box acc,
+          }))))
+  }
+
+  impl<'p> FromPest<'p> for Call<'p> {
     type Rule = Rule;
     type FatalError = Void;
-    fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<UnaryPrefix<'p>, PestError> {
-      let mut inner = pest.next().unwrap().into_inner();
-      Ok(UnaryPrefix {
-        op: UnaryPrefixOp::from_pest(&mut inner)?,
-        expr: box Expr::from_pest(&mut inner)?,
+    fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<Call<'p>, PestError> {
+      Ok(Call {
+        id: Ident::from_pest(&mut Pairs::single(pest.next().unwrap()))?,
+        args: pest.map(|pair| Expr::from_pest(&mut Pairs::single(pair)))
+          .collect::<Result<Vec<Expr>, _>>()?,
       })
     }
   }
@@ -165,41 +175,53 @@ mod ast {
     type FatalError = Void;
     fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<Term<'p>, PestError> {
       Ok(Term {
-        term: pest.next().unwrap().as_str()
+        id: Ident::from_pest(&mut Pairs::single(pest.next().unwrap()))?,
       })
     }
   }
 
-  impl<'p> FromPest<'p> for BinaryInfixOp {
+  impl<'p> FromPest<'p> for Ident<'p> {
     type Rule = Rule;
     type FatalError = Void;
-    fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<BinaryInfixOp, PestError> {
-      Ok(match pest.next().unwrap().as_rule() {
-        Rule::add => BinaryInfixOp::Add,
-        Rule::mul => BinaryInfixOp::Mul,
-        _         => unreachable!(),
+    fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<Ident<'p>, PestError> {
+      Ok(Ident {
+        id: pest.next().unwrap().as_str()
       })
     }
   }
-  impl<'p> FromPest<'p> for UnaryPrefixOp {
+
+  impl<'p> FromPest<'p> for Infix {
     type Rule = Rule;
     type FatalError = Void;
-    fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<UnaryPrefixOp, PestError> {
-      Ok(match pest.next().unwrap().as_rule() {
-        Rule::not => UnaryPrefixOp::Not,
-        Rule::neg => UnaryPrefixOp::Neg,
-        _         => unreachable!(),
-      })
+    fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<Infix, PestError> {
+      match pest.next().unwrap().as_rule() {
+        Rule::add => Ok(Infix::Add),
+        Rule::mul => Ok(Infix::Mul),
+        _         => Err(ConversionError::NoMatch),
+      }
     }
   }
-  impl<'p> FromPest<'p> for UnarySuffixOp {
+  impl<'p> FromPest<'p> for Prefix {
     type Rule = Rule;
     type FatalError = Void;
-    fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<UnarySuffixOp, PestError> {
-      Ok(match pest.next().unwrap().as_rule() {
-        Rule::try => UnarySuffixOp::Try,
-        _         => unreachable!(),
-      })
+    fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<Prefix, PestError> {
+      match pest.next().unwrap().as_rule() {
+        Rule::not => Ok(Prefix::Not),
+        Rule::neg => Ok(Prefix::Neg),
+        _         => Err(ConversionError::NoMatch),
+      }
+    }
+  }
+  impl<'p> FromPest<'p> for Suffix<'p> {
+    type Rule = Rule;
+    type FatalError = Void;
+    fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<Suffix<'p>, PestError> {
+      let mut pair = pest.next().unwrap();
+      match pair.as_rule() {
+        Rule::try  => Ok(Suffix::Try),
+        Rule::call => Ok(Suffix::Call(Call::from_pest(&mut Pairs::single(pair))?)),
+        _          => Err(ConversionError::NoMatch),
+      }
     }
   }
 }
