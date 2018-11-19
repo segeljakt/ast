@@ -22,11 +22,15 @@ mod parser {
 
 mod ast {
   use super::parser::Rule;
-  use pest::{iterators::{Pair, Pairs}, prec_climber::PrecClimber};
+  use pest::{
+    iterators::{Pair, Pairs},
+    prec_climber::{PrecClimber, Assoc::*, Operator},
+    RuleType
+  };
   use from_pest::{FromPest, ConversionError};
   use void::Void;
   use either::Either;
-  use pest::RuleType;
+  use std::collections::HashMap;
 
   type PestError = ConversionError<Void>;
 
@@ -44,8 +48,8 @@ mod ast {
 
   #[derive(Debug)]
   pub struct UnaryOp<'p> {
+    pub expr: Box<Expr<'p>>,
     pub op: Either<Prefix,Suffix<'p>>,
-    pub expr: Box<Expr<'p>>
   }
 
   #[derive(Debug)]
@@ -99,35 +103,48 @@ mod ast {
     }
   }
 
-  lazy_static! {
-    static ref PREC_CLIMBER: PrecClimber<Rule> = {
-      use pest::prec_climber::Assoc::*;
-      use pest::prec_climber::Operator;
+  #[derive(Clone)]
+  enum Position {
+    Suffix,
+    Prefix,
+  }
 
+  lazy_static! {
+    static ref PREC_CLIMBER: PrecClimber<Rule> =
       PrecClimber::new(vec![
         Operator::new(Rule::add, Left),
         Operator::new(Rule::mul, Left),
-      ])
-    };
+      ]);
+  }
+
+  lazy_static! {
+    static ref UNARY_OPS: HashMap<Rule, Position> = [
+      (Rule::not, Position::Prefix),
+      (Rule::neg, Position::Prefix),
+      (Rule::try, Position::Suffix),
+      (Rule::call, Position::Suffix)
+    ].iter().cloned().collect();
   }
 
   impl<'p> FromPest<'p> for Expr<'p> {
     type Rule = Rule;
     type FatalError = Void;
     fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<Expr<'p>, PestError> {
-      PREC_CLIMBER.climb_arity(Rule::prefix, pest,
+      PREC_CLIMBER.climb_arity(&*UNARY_OPS, pest,
         |pair: Pair<Rule>| match pair.as_rule() {
           Rule::expr => Ok(Expr::from_pest(&mut pair.into_inner())?),
           Rule::term => Ok(Expr::Term(Term::from_pest(&mut Pairs::single(pair))?)),
-          x          => { println!("{:?}", x); unreachable!() },
+          _          => unreachable!(),
         },
-        |prefix: Pair<Rule>, rhs: Result<Expr<'p>, PestError>| Ok(Expr::UnaryOp(UnaryOp{
-          op: Either::Left(Prefix::from_pest(&mut Pairs::single(prefix))?),
-          expr: box rhs?,
+        |prefix: Pair<Rule>, rhs: Result<Expr<'p>, PestError>|
+          Ok(Expr::UnaryOp(UnaryOp{
+            op: Either::Left(Prefix::from_pest(&mut Pairs::single(prefix))?),
+            expr: box rhs?,
         })),
-        |lhs: Result<Expr<'p>, PestError>, suffix: Pair<Rule>| Ok(Expr::UnaryOp(UnaryOp{
-          op: Either::Right(Suffix::from_pest(&mut Pairs::single(suffix))?),
-          expr: box lhs?,
+        |lhs: Result<Expr<'p>, PestError>, suffix: Pair<Rule>|
+          Ok(Expr::UnaryOp(UnaryOp{
+            op: Either::Right(Suffix::from_pest(&mut Pairs::single(suffix))?),
+            expr: box lhs?,
         })),
         |lhs: Result<Expr<'p>, PestError>, infix: Pair<Rule>, rhs: Result<Expr<'p>, PestError>|
           Ok(Expr::BinaryOp(BinaryOp {
@@ -142,7 +159,7 @@ mod ast {
   trait ArityPrecClimber<R: RuleType> {
     fn climb_arity<'i, P, F, G, H, I, T>(
       &self,
-      unary_rule: R,
+      unary_ops: &HashMap<R, Position>,
       pairs: &mut P,
       primary: F,
       prefix: G,
@@ -155,8 +172,8 @@ mod ast {
           H: Fn(T, Pair<'i, R>) -> T,
           I: Fn(T, Pair<'i, R>, T) -> T;
 
-    fn climb_prefix<'i, P, F, G, T>(
-      unary_rule: R,
+    fn prefix_rec<'i, P, F, G, T>(
+      unary_ops: &HashMap<R, Position>,
       pairs: &mut P,
       primary: &F,
       prefix: &G,
@@ -166,13 +183,12 @@ mod ast {
           G: Fn(Pair<'i, R>, T) -> T,
     {
       let pair = pairs.next().unwrap();
-      println!("{:?}", unary_rule);
-      println!("{:?}", pair);
-      if pair.as_rule() == unary_rule {
-        let expr = Self::climb_prefix(unary_rule, pairs, primary, prefix);
-        prefix(pair, expr)
-      } else {
-        primary(pair)
+      match unary_ops.get(&pair.as_rule()) {
+        Some(Position::Prefix) => {
+          let expr = Self::prefix_rec(unary_ops, pairs, primary, prefix);
+          prefix(pair, expr)
+        },
+        _ => primary(pair),
       }
     }
 
@@ -181,7 +197,7 @@ mod ast {
   impl<R: RuleType> ArityPrecClimber<R> for PrecClimber<R> {
     fn climb_arity<'i, P, F, G, H, I, T>(
       &self,
-      unary_rule: R,
+      unary_ops: &HashMap<R, Position>,
       pairs: &mut P,
       primary: F,
       prefix: G,
@@ -196,11 +212,10 @@ mod ast {
     {
       let unary = |pair: Pair<'i,R>| {
         let mut inner = pair.into_inner();
-        println!("{:}", inner);
-        let expr = Self::climb_prefix(unary_rule, &mut inner, &primary, &prefix);
+        let expr = Self::prefix_rec(&unary_ops, &mut inner, &primary, &prefix);
         inner.fold(expr, |acc, pair| suffix(acc, pair))
       };
-      self.climb(pairs, unary, infix)
+      self.climb(&mut pairs.next().unwrap().into_inner(), unary, infix)
     }
   }
 
@@ -209,7 +224,7 @@ mod ast {
     type FatalError = Void;
     fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<Call<'p>, PestError> {
       Ok(Call {
-        id: Ident::from_pest(&mut Pairs::single(pest.next().unwrap()))?,
+        id: Ident::from_pest(pest)?,
         args: pest.map(|pair| Expr::from_pest(&mut Pairs::single(pair)))
           .collect::<Result<Vec<Expr>, _>>()?,
       })
@@ -263,9 +278,10 @@ mod ast {
     type FatalError = Void;
     fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<Suffix<'p>, PestError> {
       let pair = pest.next().unwrap();
+      println!("{}", pair);
       match pair.as_rule() {
         Rule::try  => Ok(Suffix::Try),
-        Rule::call => Ok(Suffix::Call(Call::from_pest(&mut Pairs::single(pair))?)),
+        Rule::call => Ok(Suffix::Call(Call::from_pest(&mut pair.into_inner())?)),
         _          => Err(ConversionError::NoMatch),
       }
     }
