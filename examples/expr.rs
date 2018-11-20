@@ -28,6 +28,7 @@ mod ast {
       Pairs
     },
     prec_climber::{
+      PrecClimberBuilder,
       PrecClimber,
       Assoc::*,
       Position::*,
@@ -106,18 +107,18 @@ mod ast {
 
   lazy_static! {
     static ref PREC_CLIMBER: PrecClimber<Rule> =
-      PrecClimber::new(
-        vec![
+      PrecClimberBuilder::new()
+        .with_unary_operators(vec![
           UnaryOperator::new(Rule::not, Prefix),
           UnaryOperator::new(Rule::neg, Prefix),
           UnaryOperator::new(Rule::try, Suffix),
           UnaryOperator::new(Rule::call, Suffix),
-        ],
-        vec![
+        ])
+        .with_binary_operators(vec![
           BinaryOperator::new(Rule::add, Left),
           BinaryOperator::new(Rule::mul, Left),
-        ]
-      );
+        ])
+        .build();
   }
 
   impl<'p> FromPest<'p> for Expr<'p> {
