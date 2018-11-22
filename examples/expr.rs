@@ -107,10 +107,8 @@ mod ast {
       PrecClimber::new()
         .op(Op::infix(Rule::add, Left))
         .op(Op::infix(Rule::mul, Left))
-        .op(Op::suffix(Rule::try))
-        .op(Op::suffix(Rule::call))
-        .op(Op::prefix(Rule::not))
-        .op(Op::prefix(Rule::neg));
+        .op(Op::suffix(Rule::try) | Op::suffix(Rule::call))
+        .op(Op::prefix(Rule::not) | Op::prefix(Rule::neg));
   }
 
   type ExprResult<'p> = Result<Expr<'p>, PestError>;
@@ -119,29 +117,28 @@ mod ast {
     type FatalError = Void;
     fn from_pest(pest: &mut Pairs<'p, Rule>) -> ExprResult<'p> {
       let pairs = pest.next().unwrap().into_inner();
-      unreachable!();
       PREC_CLIMBER
         .map_primary(|pair: Pair<Rule>| match pair.as_rule() {
           Rule::expr => Ok(Expr::from_pest(&mut Pairs::single(pair))?),
           Rule::term => Ok(Expr::Term { id: Ident::from_pest(&mut pair.into_inner())?}),
           _          => unreachable!(),
         })
-        //.map_prefix(|op: Pair<Rule>, r: ExprResult<'p>|
-          //Ok(Expr::UnaryOp {
-            //op: Either::Left(Prefix::from_pest(&mut Pairs::single(op))?),
-            //expr: box r?,
-          //}))
-        //.map_suffix(|l: ExprResult<'p>, op: Pair<Rule>|
-          //Ok(Expr::UnaryOp {
-            //op: Either::Right(Suffix::from_pest(&mut Pairs::single(op))?),
-            //expr: box l?,
-          //}))
-        //.map_infix(|l: ExprResult<'p>, op: Pair<Rule>, r: ExprResult<'p>|
-          //Ok(Expr::BinaryOp {
-            //lhs: box l?,
-            //op: Infix::from_pest(&mut Pairs::single(op))?,
-            //rhs: box r?
-          //}))
+        .map_prefix(|op: Pair<Rule>, r: ExprResult<'p>|
+          Ok(Expr::UnaryOp {
+            op: Either::Left(Prefix::from_pest(&mut Pairs::single(op))?),
+            expr: box r?,
+          }))
+        .map_suffix(|l: ExprResult<'p>, op: Pair<Rule>|
+          Ok(Expr::UnaryOp {
+            op: Either::Right(Suffix::from_pest(&mut Pairs::single(op))?),
+            expr: box l?,
+          }))
+        .map_infix(|l: ExprResult<'p>, op: Pair<Rule>, r: ExprResult<'p>|
+          Ok(Expr::BinaryOp {
+            lhs: box l?,
+            op: Infix::from_pest(&mut Pairs::single(op))?,
+            rhs: box r?
+          }))
         .climb(pairs)
     }
   }
