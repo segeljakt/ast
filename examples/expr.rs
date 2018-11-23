@@ -118,17 +118,17 @@ mod ast {
     fn from_pest(pest: &mut Pairs<'p, Rule>) -> ExprResult<'p> {
       let pairs = pest.next().unwrap().into_inner();
       PREC_CLIMBER
-        .map_primary(|pair: Pair<Rule>| match pair.as_rule() {
+        .map_primary(|pair| match pair.as_rule() {
           Rule::expr => Ok(Expr::from_pest(&mut Pairs::single(pair))?),
           Rule::term => Ok(Expr::Term { id: Ident::from_pest(&mut pair.into_inner())?}),
           _          => unreachable!(),
         })
-        .map_prefix(|op: Pair<Rule>, r: ExprResult<'p>|
+        .map_prefix(|op, r: ExprResult<'p>|
           Ok(Expr::UnaryOp {
             op: Either::Left(Prefix::from_pest(&mut Pairs::single(op))?),
             expr: box r?,
           }))
-        .map_suffix(|l: ExprResult<'p>, op: Pair<Rule>|
+        .map_suffix(|l: ExprResult<'p>, op|
           Ok(Expr::UnaryOp {
             op: Either::Right(Suffix::from_pest(&mut Pairs::single(op))?),
             expr: box l?,
