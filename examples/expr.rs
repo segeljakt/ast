@@ -104,14 +104,14 @@ mod ast {
     }
   }
 
-  lazy_static! {
-    static ref PREC_CLIMBER: PrecClimber<Rule> =
-      PrecClimber::new()
-        .op(Op::infix(Rule::add, Left) | Op::infix(Rule::sub, Left))
-        .op(Op::infix(Rule::mul, Left) | Op::infix(Rule::div, Left))
-        .op(Op::postfix(Rule::try) | Op::postfix(Rule::call))
-        .op(Op::prefix(Rule::not) | Op::prefix(Rule::neg));
-  }
+lazy_static! {
+  static ref PREC_CLIMBER: PrecClimber<Rule> =
+    PrecClimber::new()
+      .op(Op::infix(Rule::add, Left) | Op::infix(Rule::sub, Left))
+      .op(Op::infix(Rule::mul, Left) | Op::infix(Rule::div, Left))
+      .op(Op::postfix(Rule::try) | Op::postfix(Rule::call))
+      .op(Op::prefix(Rule::not) | Op::prefix(Rule::neg));
+}
 
   type ExprResult<'p> = Result<Expr<'p>, PestError>;
   impl<'p> FromPest<'p> for Expr<'p> {
@@ -124,17 +124,17 @@ mod ast {
           Rule::term => Ok(Expr::Term { id: Ident::from_pest(&mut pair.into_inner())?}),
           _          => unreachable!(),
         })
-        .map_prefix(|op, r: ExprResult<'p>|
+        .map_prefix(|op, r|
           Ok(Expr::UnaryOp {
             op: Either::Left(Prefix::from_pest(&mut Pairs::single(op))?),
             expr: box r?,
           }))
-        .map_postfix(|l: ExprResult<'p>, op|
+        .map_postfix(|l, op|
           Ok(Expr::UnaryOp {
             op: Either::Right(Suffix::from_pest(&mut Pairs::single(op))?),
             expr: box l?,
           }))
-        .map_infix(|l: ExprResult<'p>, op: Pair<Rule>, r: ExprResult<'p>|
+        .map_infix(|l, op, r|
           Ok(Expr::BinaryOp {
             lhs: box l?,
             op: Infix::from_pest(&mut Pairs::single(op))?,
