@@ -72,7 +72,9 @@ mod ast {
   #[derive(Debug)]
   pub enum Infix {
     Add,
+    Sub,
     Mul,
+    Div,
   }
 
   #[derive(Debug)]
@@ -105,9 +107,9 @@ mod ast {
   lazy_static! {
     static ref PREC_CLIMBER: PrecClimber<Rule> =
       PrecClimber::new()
-        .op(Op::infix(Rule::add, Left))
-        .op(Op::infix(Rule::mul, Left))
-        .op(Op::suffix(Rule::try) | Op::suffix(Rule::call))
+        .op(Op::infix(Rule::add, Left) | Op::infix(Rule::sub, Left))
+        .op(Op::infix(Rule::mul, Left) | Op::infix(Rule::div, Left))
+        .op(Op::postfix(Rule::try) | Op::postfix(Rule::call))
         .op(Op::prefix(Rule::not) | Op::prefix(Rule::neg));
   }
 
@@ -116,10 +118,9 @@ mod ast {
     type Rule = Rule;
     type FatalError = Void;
     fn from_pest(pest: &mut Pairs<'p, Rule>) -> ExprResult<'p> {
-      let pairs = pest.next().unwrap().into_inner();
       PREC_CLIMBER
         .map_primary(|pair| match pair.as_rule() {
-          Rule::expr => Ok(Expr::from_pest(&mut Pairs::single(pair))?),
+          Rule::expr => Ok(Expr::from_pest(&mut pair.into_inner())?),
           Rule::term => Ok(Expr::Term { id: Ident::from_pest(&mut pair.into_inner())?}),
           _          => unreachable!(),
         })
@@ -128,7 +129,7 @@ mod ast {
             op: Either::Left(Prefix::from_pest(&mut Pairs::single(op))?),
             expr: box r?,
           }))
-        .map_suffix(|l: ExprResult<'p>, op|
+        .map_postfix(|l: ExprResult<'p>, op|
           Ok(Expr::UnaryOp {
             op: Either::Right(Suffix::from_pest(&mut Pairs::single(op))?),
             expr: box l?,
@@ -139,7 +140,8 @@ mod ast {
             op: Infix::from_pest(&mut Pairs::single(op))?,
             rhs: box r?
           }))
-        .climb(pairs)
+        .climb(pest)
+        .unwrap()
     }
   }
 
@@ -171,7 +173,9 @@ mod ast {
     fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<Infix, PestError> {
       match pest.next().unwrap().as_rule() {
         Rule::add => Ok(Infix::Add),
+        Rule::sub => Ok(Infix::Sub),
         Rule::mul => Ok(Infix::Mul),
+        Rule::div => Ok(Infix::Div),
         _         => Err(ConversionError::NoMatch),
       }
     }
@@ -210,7 +214,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   let source = String::from_utf8(fs::read("./examples/expr.txt")?)?;
   let mut parse_tree = parser::Parser::parse(parser::Rule::program, &source)?;
   println!("parse tree = {:#?}", parse_tree);
-  let syntax_tree = Program::from_pest(&mut parse_tree).expect("infallible");
+  let mut program = parse_tree.next().unwrap().into_inner();
+  let syntax_tree = Program::from_pest(&mut program).expect("infallible");
   println!("syntax tree = {:#?}", syntax_tree);
 
   Ok(())
