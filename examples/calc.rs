@@ -22,19 +22,19 @@ use pest::{
 use std::io::{stdin, stdout, Write};
 use parser::Rule;
 
-fn parse_str(pairs: Pairs<Rule>, climber: &PrecClimber<Rule>) -> String {
+fn interpret_str(pairs: Pairs<Rule>, climber: &PrecClimber<Rule>) -> String {
   climber
       .map_primary(|primary| match primary.as_rule() {
           Rule::int  => primary.as_str().to_owned(),
-          Rule::expr => parse_str(primary.into_inner(), climber),
+          Rule::expr => interpret_str(primary.into_inner(), climber),
           _          => unreachable!(),
       })
       .map_prefix(|op, rhs| match op.as_rule() {
-          Rule::neg  => format!("-({})", rhs),
+          Rule::neg  => format!("(-{})", rhs),
           _          => unreachable!(),
       })
       .map_postfix(|lhs, op| match op.as_rule() {
-          Rule::fac  => format!("({})!", lhs),
+          Rule::fac  => format!("({}!)", lhs),
           _          => unreachable!(),
       })
       .map_infix(|lhs, op, rhs| match op.as_rule() {
@@ -49,11 +49,11 @@ fn parse_str(pairs: Pairs<Rule>, climber: &PrecClimber<Rule>) -> String {
       .unwrap()
 }
 
-fn parse_i32(pairs: Pairs<Rule>, climber: &PrecClimber<Rule>) -> i128 {
+fn interpret_i32(pairs: Pairs<Rule>, climber: &PrecClimber<Rule>) -> i128 {
   climber
       .map_primary(|primary| match primary.as_rule() {
           Rule::int  => primary.as_str().parse().unwrap(),
-          Rule::expr => parse_i32(primary.into_inner(), climber),
+          Rule::expr => interpret_i32(primary.into_inner(), climber),
           _          => unreachable!(),
       })
       .map_prefix(|op, rhs| match op.as_rule() {
@@ -97,21 +97,20 @@ fn main() {
         input.trim().to_string()
       };
 
-      let result = {
-        let mut parse_tree = parser::Parser::parse(Rule::program, &source).unwrap();
-        let pairs = parse_tree
-          .next().unwrap().into_inner()  // inner of program
-          .next().unwrap().into_inner(); // inner of expr
-        parse_i32(pairs, &climber)
+      let pairs = match parser::Parser::parse(Rule::program, &source) {
+        Ok(mut parse_tree) => {
+          parse_tree
+            .next().unwrap().into_inner() // inner of program
+            .next().unwrap().into_inner() // inner of expr
+        },
+        Err(err) => {
+          println!("Failed parsing input: {:}", err);
+          continue;
+        }
       };
 
-      let pretty = {
-        let mut parse_tree = parser::Parser::parse(Rule::program, &source).unwrap();
-        let pairs = parse_tree
-          .next().unwrap().into_inner()  // inner of program
-          .next().unwrap().into_inner(); // inner of expr
-        parse_str(pairs, &climber)
-      };
+      let result = interpret_i32(pairs.clone(), &climber);
+      let pretty = interpret_str(pairs.clone(), &climber);
 
       println!("{} => {} => {}", source, pretty, result);
     }
