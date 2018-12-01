@@ -11,6 +11,7 @@ mod parser {
 }
 
 use pest::{
+  Parser,
   iterators::Pairs,
   prec_climber::{
     PrecClimber,
@@ -18,15 +19,41 @@ use pest::{
     Op,
   },
 };
-use pest::Parser;
-use std::fs;
+use std::io::{stdin, stdout, Write};
 use parser::Rule;
 
-fn parse_expr(pairs: Pairs<Rule>, climber: &PrecClimber<Rule>) -> i32 {
+fn parse_str(pairs: Pairs<Rule>, climber: &PrecClimber<Rule>) -> String {
+  climber
+      .map_primary(|primary| match primary.as_rule() {
+          Rule::int  => primary.as_str().to_owned(),
+          Rule::expr => parse_str(primary.into_inner(), climber),
+          _          => unreachable!(),
+      })
+      .map_prefix(|op, rhs| match op.as_rule() {
+          Rule::neg  => format!("-({})", rhs),
+          _          => unreachable!(),
+      })
+      .map_postfix(|lhs, op| match op.as_rule() {
+          Rule::fac  => format!("({})!", lhs),
+          _          => unreachable!(),
+      })
+      .map_infix(|lhs, op, rhs| match op.as_rule() {
+          Rule::add  => format!("({}+{})", lhs, rhs),
+          Rule::sub  => format!("({}-{})", lhs, rhs),
+          Rule::mul  => format!("({}*{})", lhs, rhs),
+          Rule::div  => format!("({}/{})", lhs, rhs),
+          Rule::pow  => format!("({}^{})", lhs, rhs),
+          _          => unreachable!(),
+      })
+      .climb(pairs)
+      .unwrap()
+}
+
+fn parse_i32(pairs: Pairs<Rule>, climber: &PrecClimber<Rule>) -> i128 {
   climber
       .map_primary(|primary| match primary.as_rule() {
           Rule::int  => primary.as_str().parse().unwrap(),
-          Rule::expr => parse_expr(primary.into_inner(), climber),
+          Rule::expr => parse_i32(primary.into_inner(), climber),
           _          => unreachable!(),
       })
       .map_prefix(|op, rhs| match op.as_rule() {
@@ -34,7 +61,7 @@ fn parse_expr(pairs: Pairs<Rule>, climber: &PrecClimber<Rule>) -> i32 {
           _          => unreachable!(),
       })
       .map_postfix(|lhs, op| match op.as_rule() {
-          Rule::fac  => (1..=lhs).product(),
+          Rule::fac  => (1..lhs+1).product(),
           _          => unreachable!(),
       })
       .map_infix(|lhs, op, rhs| match op.as_rule() {
@@ -42,32 +69,51 @@ fn parse_expr(pairs: Pairs<Rule>, climber: &PrecClimber<Rule>) -> i32 {
           Rule::sub  => lhs - rhs,
           Rule::mul  => lhs * rhs,
           Rule::div  => lhs / rhs,
-          Rule::pow  => (1..=rhs).map(|_| lhs).product(),
+          Rule::pow  => (1..rhs+1).map(|_| lhs).product(),
           _          => unreachable!(),
       })
       .climb(pairs)
       .unwrap()
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() {
 
-  let climber = PrecClimber::new()
+    let climber = PrecClimber::new()
       .op(Op::infix(Rule::add, Left) | Op::infix(Rule::sub, Left))
       .op(Op::infix(Rule::mul, Left) | Op::infix(Rule::div, Left))
       .op(Op::infix(Rule::pow, Right))
       .op(Op::postfix(Rule::fac))
       .op(Op::prefix(Rule::neg));
 
-  let source = String::from_utf8(fs::read("./examples/calc.txt")?)?;
-  let mut parse_tree = parser::Parser::parse(Rule::program, &source)?;
-  println!("parse tree = {:#?}", parse_tree);
+    let stdin = stdin();
+    let mut stdout = stdout();
 
-  let pairs = parse_tree
-    .next().unwrap().into_inner()  // inner of program
-    .next().unwrap().into_inner(); // inner of expr
-  let result = parse_expr(pairs, &climber);
-  println!("result = {:#?}", result);
+    loop {
+      let source = {
+        print!("> ");
+        let _ = stdout.flush();
+        let mut input = String::new();
+        stdin.read_line(&mut input).unwrap();
+        input.trim().to_string()
+      };
 
-  Ok(())
+      let result = {
+        let mut parse_tree = parser::Parser::parse(Rule::program, &source).unwrap();
+        let pairs = parse_tree
+          .next().unwrap().into_inner()  // inner of program
+          .next().unwrap().into_inner(); // inner of expr
+        parse_i32(pairs, &climber)
+      };
+
+      let pretty = {
+        let mut parse_tree = parser::Parser::parse(Rule::program, &source).unwrap();
+        let pairs = parse_tree
+          .next().unwrap().into_inner()  // inner of program
+          .next().unwrap().into_inner(); // inner of expr
+        parse_str(pairs, &climber)
+      };
+
+      println!("{} => {} => {}", source, pretty, result);
+    }
 }
 

@@ -23,10 +23,7 @@ mod parser {
 mod ast {
   use super::parser::Rule;
   use pest::{
-    iterators::{
-      Pair,
-      Pairs
-    },
+    iterators::Pairs,
     prec_climber::{
       PrecClimber,
       Assoc::*,
