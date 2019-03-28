@@ -15,211 +15,208 @@ extern crate lazy_static;
 extern crate either;
 
 mod parser {
-  #[derive(Parser)]
-  #[grammar = "../examples/expr.pest"]
-  pub struct Parser;
+    #[derive(Parser)]
+    #[grammar = "../examples/expr.pest"]
+    pub struct Parser;
 }
 
 mod ast {
-  use super::parser::Rule;
-  use pest::{
-    iterators::Pairs,
-    prec_climber::{
-      PrecClimber,
-      Assoc::*,
-      Op,
-    },
-  };
-  use from_pest::{
-    FromPest,
-    ConversionError
-  };
-  use void::Void;
-  use either::Either;
+    use super::parser::Rule;
+    use either::Either;
+    use from_pest::{ConversionError, FromPest};
+    use pest::{
+        iterators::Pairs,
+        prec_climber::{Assoc::*, Op, PrecClimber},
+    };
+    use void::Void;
 
-  type PestError = ConversionError<Void>;
+    type PestError = ConversionError<Void>;
 
-  #[derive(Debug)]
-  pub struct Program<'p> {
-    pub expr: Expr<'p>,
-  }
-
-  #[derive(Debug)]
-  pub enum Expr<'p> {
-    UnaryOp {
-      expr: Box<Expr<'p>>,
-      op: Either<Prefix,Suffix<'p>>
-    },
-    BinaryOp {
-      lhs: Box<Expr<'p>>,
-      op: Infix,
-      rhs: Box<Expr<'p>>
-    },
-    Term {
-      id: Ident<'p>
-    },
-  }
-
-  #[derive(Debug)]
-  pub enum Prefix {
-    Not,
-    Neg,
-  }
-
-  #[derive(Debug)]
-  pub enum Infix {
-    Add,
-    Sub,
-    Mul,
-    Div,
-  }
-
-  #[derive(Debug)]
-  pub enum Suffix<'p> {
-    Try,
-    Call(Call<'p>),
-  }
-
-  #[derive(Debug)]
-  pub struct Call<'p> {
-    pub id: Ident<'p>,
-    pub args: Vec<Expr<'p>>
-  }
-
-  #[derive(Debug)]
-  pub struct Ident<'p> {
-    pub id: &'p str,
-  }
-
-  impl<'p> FromPest<'p> for Program<'p> {
-    type Rule = Rule;
-    type FatalError = Void;
-    fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<Program<'p>, PestError> {
-      Ok(Program {
-        expr: Expr::from_pest(&mut pest.next().unwrap().into_inner())?
-      })
+    #[derive(Debug)]
+    pub struct Program<'p> {
+        pub expr: Expr<'p>,
     }
-  }
 
-lazy_static! {
-  static ref PREC_CLIMBER: PrecClimber<Rule> =
-    PrecClimber::new()
-      .op(Op::infix(Rule::add, Left) | Op::infix(Rule::sub, Left))
-      .op(Op::infix(Rule::mul, Left) | Op::infix(Rule::div, Left))
-      .op(Op::postfix(Rule::try) | Op::postfix(Rule::call))
-      .op(Op::prefix(Rule::not) | Op::prefix(Rule::neg));
-}
+    #[derive(Debug)]
+    pub enum Expr<'p> {
+        UnaryOp {
+            expr: Box<Expr<'p>>,
+            op: Either<Prefix, Suffix<'p>>,
+        },
+        BinaryOp {
+            lhs: Box<Expr<'p>>,
+            op: Infix,
+            rhs: Box<Expr<'p>>,
+        },
+        Term {
+            id: Ident<'p>,
+        },
+    }
 
-  type ExprResult<'p> = Result<Expr<'p>, PestError>;
-  impl<'p> FromPest<'p> for Expr<'p> {
-    type Rule = Rule;
-    type FatalError = Void;
-    fn from_pest(pest: &mut Pairs<'p, Rule>) -> ExprResult<'p> {
-      PREC_CLIMBER
-        .map_primary(|pair| match pair.as_rule() {
-          Rule::expr => Ok(Expr::from_pest(&mut pair.into_inner())?),
-          Rule::term => Ok(Expr::Term { id: Ident::from_pest(&mut pair.into_inner())?}),
-          _          => unreachable!(),
-        })
-        .map_prefix(|op, r|
-          Ok(Expr::UnaryOp {
-            op: Either::Left(Prefix::from_pest(&mut Pairs::single(op))?),
-            expr: box r?,
-          }))
-        .map_postfix(|l, op|
-          Ok(Expr::UnaryOp {
-            op: Either::Right(Suffix::from_pest(&mut Pairs::single(op))?),
-            expr: box l?,
-          }))
-        .map_infix(|l, op, r|
-          Ok(Expr::BinaryOp {
-            lhs: box l?,
-            op: Infix::from_pest(&mut Pairs::single(op))?,
-            rhs: box r?
-          }))
-        .climb(pest)
-        .unwrap()
+    #[derive(Debug)]
+    pub enum Prefix {
+        Not,
+        Neg,
     }
-  }
 
-  impl<'p> FromPest<'p> for Call<'p> {
-    type Rule = Rule;
-    type FatalError = Void;
-    fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<Call<'p>, PestError> {
-      Ok(Call {
-        id: Ident::from_pest(pest)?,
-        args: pest.map(|pair| Expr::from_pest(&mut Pairs::single(pair)))
-          .collect::<Result<Vec<Expr>, _>>()?,
-      })
+    #[derive(Debug)]
+    pub enum Infix {
+        Add,
+        Sub,
+        Mul,
+        Div,
     }
-  }
 
-  impl<'p> FromPest<'p> for Ident<'p> {
-    type Rule = Rule;
-    type FatalError = Void;
-    fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<Ident<'p>, PestError> {
-      Ok(Ident {
-        id: pest.next().unwrap().as_str()
-      })
+    #[derive(Debug)]
+    pub enum Suffix<'p> {
+        Try,
+        Call(Call<'p>),
     }
-  }
 
-  impl<'p> FromPest<'p> for Infix {
-    type Rule = Rule;
-    type FatalError = Void;
-    fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<Infix, PestError> {
-      match pest.next().unwrap().as_rule() {
-        Rule::add => Ok(Infix::Add),
-        Rule::sub => Ok(Infix::Sub),
-        Rule::mul => Ok(Infix::Mul),
-        Rule::div => Ok(Infix::Div),
-        _         => Err(ConversionError::NoMatch),
-      }
+    #[derive(Debug)]
+    pub struct Call<'p> {
+        pub id: Ident<'p>,
+        pub args: Vec<Expr<'p>>,
     }
-  }
-  impl<'p> FromPest<'p> for Prefix {
-    type Rule = Rule;
-    type FatalError = Void;
-    fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<Prefix, PestError> {
-      match pest.next().unwrap().as_rule() {
-        Rule::not => Ok(Prefix::Not),
-        Rule::neg => Ok(Prefix::Neg),
-        _         => Err(ConversionError::NoMatch),
-      }
+
+    #[derive(Debug)]
+    pub struct Ident<'p> {
+        pub id: &'p str,
     }
-  }
-  impl<'p> FromPest<'p> for Suffix<'p> {
-    type Rule = Rule;
-    type FatalError = Void;
-    fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<Suffix<'p>, PestError> {
-      let pair = pest.next().unwrap();
-      match pair.as_rule() {
-        Rule::try  => Ok(Suffix::Try),
-        Rule::call => Ok(Suffix::Call(Call::from_pest(&mut pair.into_inner())?)),
-        _          => Err(ConversionError::NoMatch),
-      }
+
+    impl<'p> FromPest<'p> for Program<'p> {
+        type Rule = Rule;
+        type FatalError = Void;
+        fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<Program<'p>, PestError> {
+            Ok(Program {
+                expr: Expr::from_pest(&mut pest.next().unwrap().into_inner())?,
+            })
+        }
     }
-  }
+
+    lazy_static! {
+        static ref PREC_CLIMBER: PrecClimber<Rule> = PrecClimber::new()
+            .op(Op::infix(Rule::add, Left) | Op::infix(Rule::sub, Left))
+            .op(Op::infix(Rule::mul, Left) | Op::infix(Rule::div, Left))
+            .op(Op::postfix(Rule::try) | Op::postfix(Rule::call))
+            .op(Op::prefix(Rule::not) | Op::prefix(Rule::neg));
+    }
+
+    type ExprResult<'p> = Result<Expr<'p>, PestError>;
+    impl<'p> FromPest<'p> for Expr<'p> {
+        type Rule = Rule;
+        type FatalError = Void;
+        fn from_pest(pest: &mut Pairs<'p, Rule>) -> ExprResult<'p> {
+            PREC_CLIMBER
+                .map_primary(|pair| match pair.as_rule() {
+                    Rule::expr => Ok(Expr::from_pest(&mut pair.into_inner())?),
+                    Rule::term => Ok(Expr::Term {
+                        id: Ident::from_pest(&mut pair.into_inner())?,
+                    }),
+                    _ => unreachable!(),
+                })
+                .map_prefix(|op, r| {
+                    Ok(Expr::UnaryOp {
+                        op: Either::Left(Prefix::from_pest(&mut Pairs::single(op))?),
+                        expr: box r?,
+                    })
+                })
+                .map_postfix(|l, op| {
+                    Ok(Expr::UnaryOp {
+                        op: Either::Right(Suffix::from_pest(&mut Pairs::single(op))?),
+                        expr: box l?,
+                    })
+                })
+                .map_infix(|l, op, r| {
+                    Ok(Expr::BinaryOp {
+                        lhs: box l?,
+                        op: Infix::from_pest(&mut Pairs::single(op))?,
+                        rhs: box r?,
+                    })
+                })
+                .climb(pest)
+                .unwrap()
+        }
+    }
+
+    impl<'p> FromPest<'p> for Call<'p> {
+        type Rule = Rule;
+        type FatalError = Void;
+        fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<Call<'p>, PestError> {
+            Ok(Call {
+                id: Ident::from_pest(pest)?,
+                args: pest
+                    .map(|pair| Expr::from_pest(&mut Pairs::single(pair)))
+                    .collect::<Result<Vec<Expr>, _>>()?,
+            })
+        }
+    }
+
+    impl<'p> FromPest<'p> for Ident<'p> {
+        type Rule = Rule;
+        type FatalError = Void;
+        fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<Ident<'p>, PestError> {
+            Ok(Ident {
+                id: pest.next().unwrap().as_str(),
+            })
+        }
+    }
+
+    impl<'p> FromPest<'p> for Infix {
+        type Rule = Rule;
+        type FatalError = Void;
+        fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<Infix, PestError> {
+            match pest.next().unwrap().as_rule() {
+                Rule::add => Ok(Infix::Add),
+                Rule::sub => Ok(Infix::Sub),
+                Rule::mul => Ok(Infix::Mul),
+                Rule::div => Ok(Infix::Div),
+                _ => Err(ConversionError::NoMatch),
+            }
+        }
+    }
+    impl<'p> FromPest<'p> for Prefix {
+        type Rule = Rule;
+        type FatalError = Void;
+        fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<Prefix, PestError> {
+            match pest.next().unwrap().as_rule() {
+                Rule::not => Ok(Prefix::Not),
+                Rule::neg => Ok(Prefix::Neg),
+                _ => Err(ConversionError::NoMatch),
+            }
+        }
+    }
+    impl<'p> FromPest<'p> for Suffix<'p> {
+        type Rule = Rule;
+        type FatalError = Void;
+        fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<Suffix<'p>, PestError> {
+            let pair = pest.next().unwrap();
+            match pair.as_rule() {
+                Rule::try => Ok(Suffix::Try),
+                Rule::call => Ok(Suffix::Call(Call::from_pest(&mut pair.into_inner())?)),
+                _ => Err(ConversionError::NoMatch),
+            }
+        }
+    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-  use ast::Program;
-  use from_pest::FromPest;
-  use pest::Parser;
-  use std::fs;
+    use ast::Program;
+    use from_pest::FromPest;
+    use pest::Parser;
+    use std::fs;
 
-  let source = String::from_utf8(fs::read("./examples/expr.txt")?)?;
-  let mut parse_tree = parser::Parser::parse(parser::Rule::program, &source)?;
-  println!("parse tree = {:#?}", parse_tree);
-  let mut program = parse_tree.next().unwrap().into_inner();
-  let syntax_tree = Program::from_pest(&mut program).expect("infallible");
-  println!("syntax tree = {:#?}", syntax_tree);
+    let source = String::from_utf8(fs::read("./examples/expr.txt")?)?;
+    let mut parse_tree = parser::Parser::parse(parser::Rule::program, &source)?;
+    println!("parse tree = {:#?}", parse_tree);
+    let mut program = parse_tree.next().unwrap().into_inner();
+    let syntax_tree = Program::from_pest(&mut program).expect("infallible");
+    println!("syntax tree = {:#?}", syntax_tree);
 
-  Ok(())
+    Ok(())
 }
 
 #[test]
 fn expr_example_runs() {
-  main().unwrap()
+    main().unwrap()
 }
-
