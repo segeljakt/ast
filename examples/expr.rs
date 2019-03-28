@@ -22,8 +22,18 @@ mod parser {
 
 mod ast {
   use super::parser::Rule;
-  use pest::{iterators::{Pair, Pairs}, prec_climber::PrecClimber};
-  use from_pest::{FromPest, ConversionError};
+  use pest::{
+    iterators::Pairs,
+    prec_climber::{
+      PrecClimber,
+      Assoc::*,
+      Op,
+    },
+  };
+  use from_pest::{
+    FromPest,
+    ConversionError
+  };
   use void::Void;
   use either::Either;
 
@@ -36,22 +46,18 @@ mod ast {
 
   #[derive(Debug)]
   pub enum Expr<'p> {
-    UnaryOp(UnaryOp<'p>),
-    BinaryOp(BinaryOp<'p>),
-    Term(Term<'p>),
-  }
-
-  #[derive(Debug)]
-  pub struct UnaryOp<'p> {
-    pub op: Either<Prefix,Suffix<'p>>,
-    pub expr: Box<Expr<'p>>
-  }
-
-  #[derive(Debug)]
-  pub struct BinaryOp<'p> {
-    pub lhs: Box<Expr<'p>>,
-    pub op: Infix,
-    pub rhs: Box<Expr<'p>>,
+    UnaryOp {
+      expr: Box<Expr<'p>>,
+      op: Either<Prefix,Suffix<'p>>
+    },
+    BinaryOp {
+      lhs: Box<Expr<'p>>,
+      op: Infix,
+      rhs: Box<Expr<'p>>
+    },
+    Term {
+      id: Ident<'p>
+    },
   }
 
   #[derive(Debug)]
@@ -63,7 +69,9 @@ mod ast {
   #[derive(Debug)]
   pub enum Infix {
     Add,
+    Sub,
     Mul,
+    Div,
   }
 
   #[derive(Debug)]
@@ -83,11 +91,6 @@ mod ast {
     pub id: &'p str,
   }
 
-  #[derive(Debug)]
-  pub struct Term<'p> {
-    pub id: Ident<'p>,
-  }
-
   impl<'p> FromPest<'p> for Program<'p> {
     type Rule = Rule;
     type FatalError = Void;
@@ -98,37 +101,44 @@ mod ast {
     }
   }
 
-  lazy_static! {
-    static ref PREC_CLIMBER: PrecClimber<Rule> = {
-      use pest::prec_climber::Assoc::*;
-      use pest::prec_climber::Operator;
+lazy_static! {
+  static ref PREC_CLIMBER: PrecClimber<Rule> =
+    PrecClimber::new()
+      .op(Op::infix(Rule::add, Left) | Op::infix(Rule::sub, Left))
+      .op(Op::infix(Rule::mul, Left) | Op::infix(Rule::div, Left))
+      .op(Op::postfix(Rule::try) | Op::postfix(Rule::call))
+      .op(Op::prefix(Rule::not) | Op::prefix(Rule::neg));
+}
 
-      PrecClimber::new(vec![
-        Operator::new(Rule::add, Left),
-        Operator::new(Rule::mul, Left),
-      ])
-    };
-  }
-
+  type ExprResult<'p> = Result<Expr<'p>, PestError>;
   impl<'p> FromPest<'p> for Expr<'p> {
     type Rule = Rule;
     type FatalError = Void;
-    fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<Expr<'p>, PestError> {
-      PREC_CLIMBER.climb(pest,
-        |pair: Pair<Rule>|
-        match pair.as_rule() {
+    fn from_pest(pest: &mut Pairs<'p, Rule>) -> ExprResult<'p> {
+      PREC_CLIMBER
+        .map_primary(|pair| match pair.as_rule() {
           Rule::expr => Ok(Expr::from_pest(&mut pair.into_inner())?),
-          Rule::term => Ok(Expr::Term(Term::from_pest(&mut Pairs::single(pair))?)),
-          Rule::unop => climb_unop(&mut pair.into_inner()),
-          _          => Err(ConversionError::NoMatch),
-        },
-        |lhs: Result<Expr<'p>, PestError>, pair: Pair<Rule>, rhs: Result<Expr<'p>, PestError>|
-        Ok(Expr::BinaryOp(BinaryOp {
-          lhs: box lhs?,
-          op: Infix::from_pest(&mut Pairs::single(pair))?,
-          rhs: box rhs?
-        }))
-      )
+          Rule::term => Ok(Expr::Term { id: Ident::from_pest(&mut pair.into_inner())?}),
+          _          => unreachable!(),
+        })
+        .map_prefix(|op, r|
+          Ok(Expr::UnaryOp {
+            op: Either::Left(Prefix::from_pest(&mut Pairs::single(op))?),
+            expr: box r?,
+          }))
+        .map_postfix(|l, op|
+          Ok(Expr::UnaryOp {
+            op: Either::Right(Suffix::from_pest(&mut Pairs::single(op))?),
+            expr: box l?,
+          }))
+        .map_infix(|l, op, r|
+          Ok(Expr::BinaryOp {
+            lhs: box l?,
+            op: Infix::from_pest(&mut Pairs::single(op))?,
+            rhs: box r?
+          }))
+        .climb(pest)
+        .unwrap()
     }
   }
 
@@ -157,25 +167,15 @@ mod ast {
             expr: box acc,
           }))))
   }
-
+  
   impl<'p> FromPest<'p> for Call<'p> {
     type Rule = Rule;
     type FatalError = Void;
     fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<Call<'p>, PestError> {
       Ok(Call {
-        id: Ident::from_pest(&mut Pairs::single(pest.next().unwrap()))?,
+        id: Ident::from_pest(pest)?,
         args: pest.map(|pair| Expr::from_pest(&mut Pairs::single(pair)))
           .collect::<Result<Vec<Expr>, _>>()?,
-      })
-    }
-  }
-
-  impl<'p> FromPest<'p> for Term<'p> {
-    type Rule = Rule;
-    type FatalError = Void;
-    fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<Term<'p>, PestError> {
-      Ok(Term {
-        id: Ident::from_pest(&mut Pairs::single(pest.next().unwrap()))?,
       })
     }
   }
@@ -196,7 +196,9 @@ mod ast {
     fn from_pest(pest: &mut Pairs<'p, Rule>) -> Result<Infix, PestError> {
       match pest.next().unwrap().as_rule() {
         Rule::add => Ok(Infix::Add),
+        Rule::sub => Ok(Infix::Sub),
         Rule::mul => Ok(Infix::Mul),
+        Rule::div => Ok(Infix::Div),
         _         => Err(ConversionError::NoMatch),
       }
     }
@@ -219,7 +221,7 @@ mod ast {
       let pair = pest.next().unwrap();
       match pair.as_rule() {
         Rule::try  => Ok(Suffix::Try),
-        Rule::call => Ok(Suffix::Call(Call::from_pest(&mut Pairs::single(pair))?)),
+        Rule::call => Ok(Suffix::Call(Call::from_pest(&mut pair.into_inner())?)),
         _          => Err(ConversionError::NoMatch),
       }
     }
