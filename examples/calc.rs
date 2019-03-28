@@ -13,20 +13,20 @@ mod parser {
 use pest::{
   Parser,
   iterators::Pairs,
-  prec_climber::{
-    PrecClimber,
+  pratt_parser::{
+    PrattParser,
     Assoc::*,
     Op,
   },
 };
-use std::io::{stdin, stdout, Write};
+use std::io::{stdin, stdout, Write, BufRead};
 use parser::Rule;
 
-fn interpret_str(pairs: Pairs<Rule>, climber: &PrecClimber<Rule>) -> String {
-  climber
+fn interpret_str(pairs: Pairs<Rule>, pratt: &PrattParser<Rule>) -> String {
+  pratt
       .map_primary(|primary| match primary.as_rule() {
           Rule::int  => primary.as_str().to_owned(),
-          Rule::expr => interpret_str(primary.into_inner(), climber),
+          Rule::expr => interpret_str(primary.into_inner(), pratt),
           _          => unreachable!(),
       })
       .map_prefix(|op, rhs| match op.as_rule() {
@@ -45,15 +45,15 @@ fn interpret_str(pairs: Pairs<Rule>, climber: &PrecClimber<Rule>) -> String {
           Rule::pow  => format!("({}^{})", lhs, rhs),
           _          => unreachable!(),
       })
-      .climb(pairs)
+      .parse(pairs)
       .unwrap()
 }
 
-fn interpret_i32(pairs: Pairs<Rule>, climber: &PrecClimber<Rule>) -> i128 {
-  climber
+fn interpret_i32(pairs: Pairs<Rule>, pratt: &PrattParser<Rule>) -> i128 {
+  pratt
       .map_primary(|primary| match primary.as_rule() {
           Rule::int  => primary.as_str().parse().unwrap(),
-          Rule::expr => interpret_i32(primary.into_inner(), climber),
+          Rule::expr => interpret_i32(primary.into_inner(), pratt),
           _          => unreachable!(),
       })
       .map_prefix(|op, rhs| match op.as_rule() {
@@ -72,13 +72,13 @@ fn interpret_i32(pairs: Pairs<Rule>, climber: &PrecClimber<Rule>) -> i128 {
           Rule::pow  => (1..rhs+1).map(|_| lhs).product(),
           _          => unreachable!(),
       })
-      .climb(pairs)
+      .parse(pairs)
       .unwrap()
 }
 
 fn main() {
 
-    let climber = PrecClimber::new()
+    let pratt = PrattParser::new()
       .op(Op::infix(Rule::add, Left) | Op::infix(Rule::sub, Left))
       .op(Op::infix(Rule::mul, Left) | Op::infix(Rule::div, Left))
       .op(Op::infix(Rule::pow, Right))
@@ -93,7 +93,7 @@ fn main() {
         print!("> ");
         let _ = stdout.flush();
         let mut input = String::new();
-        stdin.read_line(&mut input).unwrap();
+        let _ = stdin.read_line(&mut input);
         input.trim().to_string()
       };
 
@@ -109,10 +109,9 @@ fn main() {
         }
       };
 
-      let result = interpret_i32(pairs.clone(), &climber);
-      let pretty = interpret_str(pairs.clone(), &climber);
-
-      println!("{} => {} => {}", source, pretty, result);
+      print!("{} => ", source);
+      print!("{} => ", interpret_i32(pairs.clone(), &pratt));
+      println!("{}", interpret_str(pairs.clone(), &pratt));
     }
 }
 

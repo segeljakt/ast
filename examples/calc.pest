@@ -13,4 +13,4 @@ program      =   { SOI ~ expr ~ EOI }
     suffix   =  _{ fac }
       fac    =   { "!" } // Factorial
     primary  =  _{ int | "(" ~ expr ~ ")" }
-      int    =  @{ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT* }
+      int    =  @{ (ASCII_NONZERO_DIGIT ~ ASCII_DIGIT+ | ASCII_DIGIT) }
