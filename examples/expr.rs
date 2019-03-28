@@ -142,6 +142,32 @@ lazy_static! {
     }
   }
 
+  fn climb_unop<'p>(pairs: &mut Pairs<'p,Rule>) -> Result<Expr<'p>, PestError> {
+    let prefix = climb_prefix(pairs)?;
+    let suffix = climb_suffix(pairs, prefix);
+    suffix
+  }
+
+  fn climb_prefix<'p>(pairs: &mut Pairs<'p, Rule>) -> Result<Expr<'p>, PestError> {
+    let pair = pairs.next().unwrap();
+    Ok(match pair.as_rule() {
+      Rule::not | Rule::neg => Expr::UnaryOp(UnaryOp {
+        op: Either::Left(Prefix::from_pest(&mut Pairs::single(pair))?),
+        expr: box climb_prefix(pairs)?,
+      }),
+      _ => Expr::from_pest(&mut Pairs::single(pair))?,
+    })
+  }
+
+  fn climb_suffix<'p>(pairs: &mut Pairs<'p, Rule>, prefix: Expr<'p>) -> Result<Expr<'p>, PestError> {
+    pairs.map(|pair| Suffix::from_pest(&mut Pairs::single(pair)))
+      .try_fold(prefix, |acc, op|
+        op.and_then(|op| Ok(Expr::UnaryOp(UnaryOp {
+            op: Either::Right(op),
+            expr: box acc,
+          }))))
+  }
+  
   impl<'p> FromPest<'p> for Call<'p> {
     type Rule = Rule;
     type FatalError = Void;
@@ -210,9 +236,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
   let source = String::from_utf8(fs::read("./examples/expr.txt")?)?;
   let mut parse_tree = parser::Parser::parse(parser::Rule::program, &source)?;
-  println!("parse tree = {:#?}", parse_tree);
-  let mut program = parse_tree.next().unwrap().into_inner();
-  let syntax_tree = Program::from_pest(&mut program).expect("infallible");
+  //println!("parse tree = {:#?}", parse_tree);
+  let syntax_tree = Program::from_pest(&mut parse_tree).expect("infallible");
   println!("syntax tree = {:#?}", syntax_tree);
 
   Ok(())
