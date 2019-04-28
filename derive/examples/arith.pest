@@ -1,0 +1,12 @@
+Program       = { SOI ~ Expr ~ EOI }
+  Expr        = { PrefixOp* ~ Primary ~ PostfixOp* ~ ( InfixOp ~ PrefixOp* ~ Primary ~ PostfixOp* )* }
+    Primary   = { Term }
+      Term    = { 'a'..'z' ~ 'a'..'z'* }
+    InfixOp   = { Add | Mul }
+      Add     = { "+" }
+      Mul     = { "*" }
+    PrefixOp  = { Not | Neg }
+      Not     = { "!" }
+      Neg     = { "-" }
+    PostfixOp = { Try }
+      Try     = { "?" }

@@ -26,27 +26,23 @@ mod ast {
     }
 
     #[derive(Debug, FromPest)]
-    #[pest_ast(rule(Rule::field))]
     pub struct Field {
         #[pest_ast(outer(with(span_into_str), with(str::parse), with(Result::unwrap)))]
         pub value: f64,
     }
 
     #[derive(Debug, FromPest)]
-    #[pest_ast(rule(Rule::record))]
     pub struct Record {
         pub fields: Vec<Field>,
     }
 
     #[derive(Debug, FromPest)]
-    #[pest_ast(rule(Rule::file))]
     pub struct File {
         pub records: Vec<Record>,
         eoi: EOI,
     }
 
     #[derive(Debug, FromPest)]
-    #[pest_ast(rule(Rule::EOI))]
     struct EOI;
 }
 
@@ -57,7 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     use std::fs;
 
     let source = String::from_utf8(fs::read("./examples/csv.csv")?)?;
-    let mut parse_tree = csv::Parser::parse(csv::Rule::file, &source)?;
+    let mut parse_tree = csv::Parser::parse(csv::Rule::File, &source)?;
     println!("parse tree = {:#?}", parse_tree);
     let syntax_tree: File = File::from_pest(&mut parse_tree).expect("infallible");
     println!("syntax tree = {:#?}", syntax_tree);
