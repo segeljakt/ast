@@ -1,5 +1,7 @@
 //! The [`FromPest`] conversion framework to convert from pest trees into typed structure.
 
+pub mod pratt_parser;
+
 #[doc(hidden)]
 pub extern crate pest;
 extern crate void;

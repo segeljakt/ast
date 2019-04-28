@@ -9,7 +9,7 @@ use {
         punctuated::Punctuated,
         spanned::Spanned,
         token::Paren,
-        Attribute, Ident, LitStr, Path,
+        Attribute, Ident, LitStr, LitInt, Path,
     },
 };
 
@@ -19,6 +19,13 @@ mod kw {
     custom_keyword!(inner);
     custom_keyword!(with);
     custom_keyword!(rule);
+    custom_keyword!(expr);
+    custom_keyword!(primary);
+    custom_keyword!(infix);
+    custom_keyword!(prefix);
+    custom_keyword!(postfix);
+    custom_keyword!(associativity);
+    custom_keyword!(precedence);
 }
 
 /// `#[pest_ast(..)]` for the outer `#[derive(FromPest)]`
@@ -27,6 +34,14 @@ pub(crate) enum DeriveAttribute {
     Grammar(GrammarAttribute),
     /// `rule(path::to)`
     Rule(RuleAttribute),
+    /// `expr`
+    Expr(ExprAttribute),
+    /// `infix`
+    Infix(InfixAttribute),
+    /// `prefix`
+    Prefix(PrefixAttribute),
+    /// `postfix`
+    Postfix(PostfixAttribute),
 }
 
 /// `#[pest_ast(..)]` for fields in `#[derive(FromPest)]`
@@ -35,6 +50,18 @@ pub(crate) enum FieldAttribute {
     Outer(OuterAttribute),
     /// `inner(rule(path::to), with(path::to),*)`
     Inner(InnerAttribute),
+    /// `primary`
+    Primary(PrimaryAttribute),
+    /// `infix`
+    Infix(InfixAttribute),
+    /// `prefix`
+    Prefix(PrefixAttribute),
+    /// `postfix`
+    Postfix(PostfixAttribute),
+    /// `precedence = 1`
+    /// or
+    /// `precedence = 1, associativity = "left"`
+    Operator(OperatorAttribute),
 }
 
 pub(crate) struct GrammarAttribute {
@@ -69,6 +96,44 @@ pub(crate) struct RuleAttribute {
     pub(crate) path: Path,
     pub(crate) sep: Token![::],
     pub(crate) variant: Ident,
+}
+
+pub(crate) struct ExprAttribute {
+    pub(crate) expr: kw::expr,
+}
+
+pub(crate) struct PrimaryAttribute {
+    pub(crate) primary: kw::primary,
+}
+
+pub(crate) struct InfixAttribute {
+    pub(crate) infix: kw::infix,
+}
+
+pub(crate) struct PrefixAttribute {
+    pub(crate) prefix: kw::prefix,
+}
+
+pub(crate) struct PostfixAttribute {
+    pub(crate) postfix: kw::postfix,
+}
+
+pub(crate) struct OperatorAttribute {
+    pub(crate) precedence: Precedence,
+    pub(crate) associativity: Option<Associativity>,
+}
+
+pub struct Precedence {
+    pub lhs: kw::precedence,
+    pub eq: Token![=],
+    pub rhs: LitInt,
+}
+
+pub struct Associativity {
+    pub comma: Token![,],
+    pub lhs: kw::associativity,
+    pub eq: Token![=],
+    pub rhs: LitStr,
 }
 
 impl DeriveAttribute {
@@ -136,6 +201,14 @@ impl Parse for DeriveAttribute {
             GrammarAttribute::parse(input).map(DeriveAttribute::Grammar)
         } else if lookahead.peek(kw::rule) {
             RuleAttribute::parse(input).map(DeriveAttribute::Rule)
+        } else if lookahead.peek(kw::expr) {
+            ExprAttribute::parse(input).map(DeriveAttribute::Expr)
+        } else if lookahead.peek(kw::infix) {
+            InfixAttribute::parse(input).map(DeriveAttribute::Infix)
+        } else if lookahead.peek(kw::prefix) {
+            PrefixAttribute::parse(input).map(DeriveAttribute::Prefix)
+        } else if lookahead.peek(kw::postfix) {
+            PostfixAttribute::parse(input).map(DeriveAttribute::Postfix)
         } else {
             Err(lookahead.error())
         }
@@ -149,6 +222,16 @@ impl Parse for FieldAttribute {
             OuterAttribute::parse(input).map(FieldAttribute::Outer)
         } else if lookahead.peek(kw::inner) {
             InnerAttribute::parse(input).map(FieldAttribute::Inner)
+        } else if lookahead.peek(kw::primary) {
+            PrimaryAttribute::parse(input).map(FieldAttribute::Primary)
+        } else if lookahead.peek(kw::infix) {
+            InfixAttribute::parse(input).map(FieldAttribute::Infix)
+        } else if lookahead.peek(kw::prefix) {
+            PrefixAttribute::parse(input).map(FieldAttribute::Prefix)
+        } else if lookahead.peek(kw::postfix) {
+            PostfixAttribute::parse(input).map(FieldAttribute::Postfix)
+        } else if lookahead.peek(kw::precedence) {
+            OperatorAttribute::parse(input).map(FieldAttribute::Operator)
         } else {
             Err(lookahead.error())
         }
@@ -160,6 +243,10 @@ impl ToTokens for DeriveAttribute {
         match self {
             DeriveAttribute::Grammar(attr) => attr.to_tokens(tokens),
             DeriveAttribute::Rule(attr) => attr.to_tokens(tokens),
+            DeriveAttribute::Expr(attr) => attr.to_tokens(tokens),
+            DeriveAttribute::Infix(attr) => attr.to_tokens(tokens),
+            DeriveAttribute::Prefix(attr) => attr.to_tokens(tokens),
+            DeriveAttribute::Postfix(attr) => attr.to_tokens(tokens),
         }
     }
 }
@@ -169,6 +256,11 @@ impl ToTokens for FieldAttribute {
         match self {
             FieldAttribute::Outer(attr) => attr.to_tokens(tokens),
             FieldAttribute::Inner(attr) => attr.to_tokens(tokens),
+            FieldAttribute::Primary(attr) => attr.to_tokens(tokens),
+            FieldAttribute::Infix(attr) => attr.to_tokens(tokens),
+            FieldAttribute::Prefix(attr) => attr.to_tokens(tokens),
+            FieldAttribute::Postfix(attr) => attr.to_tokens(tokens),
+            FieldAttribute::Operator(attr) => attr.to_tokens(tokens),
         }
     }
 }
@@ -306,5 +398,111 @@ impl ToTokens for RuleAttribute {
             self.sep.to_tokens(tokens);
             self.variant.to_tokens(tokens);
         });
+    }
+}
+
+impl Parse for ExprAttribute {
+    fn parse(input: ParseStream) -> Result<Self> {
+        Ok(ExprAttribute {
+            expr: input.parse()?,
+        })
+    }
+}
+
+impl ToTokens for ExprAttribute {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        self.expr.to_tokens(tokens);
+    }
+}
+
+impl Parse for InfixAttribute {
+    fn parse(input: ParseStream) -> Result<Self> {
+        Ok(InfixAttribute {
+            infix: input.parse()?,
+        })
+    }
+}
+
+impl ToTokens for InfixAttribute {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        self.infix.to_tokens(tokens);
+    }
+}
+
+impl Parse for PrefixAttribute {
+    fn parse(input: ParseStream) -> Result<Self> {
+        Ok(PrefixAttribute {
+            prefix: input.parse()?,
+        })
+    }
+}
+
+impl ToTokens for PrefixAttribute {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        self.prefix.to_tokens(tokens);
+    }
+}
+
+impl Parse for PostfixAttribute {
+    fn parse(input: ParseStream) -> Result<Self> {
+        Ok(PostfixAttribute {
+            postfix: input.parse()?,
+        })
+    }
+}
+
+impl ToTokens for PostfixAttribute {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        self.postfix.to_tokens(tokens);
+    }
+}
+
+impl Parse for PrimaryAttribute {
+    fn parse(input: ParseStream) -> Result<Self> {
+        Ok(PrimaryAttribute {
+            primary: input.parse()?,
+        })
+    }
+}
+
+impl ToTokens for PrimaryAttribute {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        self.primary.to_tokens(tokens);
+    }
+}
+
+impl Parse for OperatorAttribute {
+    fn parse(input: ParseStream) -> Result<Self> {
+        Ok(OperatorAttribute {
+            precedence: Precedence {
+                lhs: input.parse()?,
+                eq: input.parse()?,
+                rhs: input.parse()?,
+            },
+            associativity: if input.is_empty() {
+                None
+            } else {
+                Some(Associativity {
+                    comma: input.parse()?,
+                    lhs: input.parse()?,
+                    eq: input.parse()?,
+                    rhs: input.parse()?,
+                })
+            },
+        })
+    }
+}
+
+impl ToTokens for OperatorAttribute {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        self.precedence.lhs.to_tokens(tokens);
+        self.precedence.eq.to_tokens(tokens);
+        self.precedence.rhs.to_tokens(tokens);
+        if let Some(ref associativity) = self.associativity {
+            associativity.comma.to_tokens(tokens);
+            associativity.lhs.to_tokens(tokens);
+            associativity.eq.to_tokens(tokens);
+            associativity.rhs.to_tokens(tokens);
+        }
     }
 }
